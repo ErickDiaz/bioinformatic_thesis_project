@@ -1,0 +1,5 @@
+classes= 3
+train  = data/malaria_yolo/train.txt  
+valid  = data/malaria_yolo/valid.txt  
+names = data/malaria_yolo/obj_es.names
+backup = weights/
