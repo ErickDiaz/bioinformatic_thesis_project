@@ -7,6 +7,7 @@
 conda create -n malaria_bio python=3 numpy imageio scipy matplotlib pandas seaborn jupyter notebook
 ```
 
+## Deep Learning Models
 #### U-net Results
 
 #### YOLO Results
