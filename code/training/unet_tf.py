@@ -408,8 +408,8 @@ class NeuralNetwork():
             if not self.learn_rate_pos == int(self.epoch // self.learn_rate_step):
                 self.learn_rate_pos = int(self.epoch // self.learn_rate_step)
                 self.learn_rate = self.get_learn_rate()
-                #print('Update learning rate to {:.10f}. Running time: {}'.format(
-                #    self.learn_rate, datetime.datetime.now()-start))
+                print('Update learning rate to {:.10f}. Running time: {}'.format(
+                    self.learn_rate, datetime.datetime.now()-start))
             
             # Train the graph.
             x_batch, y_batch = self.next_mini_batch() # next mini batch
@@ -558,6 +558,11 @@ class NeuralNetwork():
         if self.use_tb_summary:
             self.train_writer.close()
             self.valid_writer.close()
+            
+    def load_session(self, filename, allow_growth=False):
+        ##
+        print("TODO:")
+        
         
     def load_session_from_file(self, filename, allow_growth=False):
         """ Load session from a file, restore the graph, and load the tensors. """
