@@ -558,13 +558,9 @@ class NeuralNetwork():
         if self.use_tb_summary:
             self.train_writer.close()
             self.valid_writer.close()
-            
-    def load_session(self, filename, allow_growth=False):
-        ##
-        print("TODO:")
+                  
         
-        
-    def load_session_from_file(self, filename, allow_growth=False):
+    def load_session_from_file(self, filename, allow_growth=False, same_location=False):
         """ Load session from a file, restore the graph, and load the tensors. """
         tf.reset_default_graph()
         filepath = os.path.join(os.getcwd(), filename + '.meta')
@@ -581,13 +577,17 @@ class NeuralNetwork():
         print(filename)
         self.graph = tf.get_default_graph() # save default graph
         print(filename)
-        self.load_parameters(filename) # load parameters
+        self.load_parameters(filename, same_location) # load parameters
         self.load_tensors(self.graph) # define relevant tensors as variables 
         return sess
     
-    def load_parameters(self, filename):
+    def load_parameters(self, filename, same_location=False):
         '''Load helper and tunable parameters.'''
-        filepath = os.path.join(os.getcwd(), SAVES_DIR_NAME, filename+'_params.npy')
+        if (same_location):
+            filepath = os.path.join(os.getcwd(), filename+'_params.npy')
+        else:
+            filepath = os.path.join(os.getcwd(), SAVES_DIR_NAME, filename+'_params.npy')
+            
         self.params = np.load(filepath, allow_pickle=True).item() # load parameters of network
         
         self.nn_name = filename
