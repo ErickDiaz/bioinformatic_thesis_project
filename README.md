@@ -9,6 +9,8 @@ conda create -n malaria_bio python=3 numpy imageio scipy matplotlib pandas seabo
 
 ## Deep Learning Models
 #### U-net Results
+![title](unet_results.png)
+
 
 #### YOLO Results
 [![YOLO MODEL TEST](http://img.youtube.com/vi/mHy5GDJO5Mw/0.jpg)](http://www.youtube.com/watch?v=mHy5GDJO5Mw)
