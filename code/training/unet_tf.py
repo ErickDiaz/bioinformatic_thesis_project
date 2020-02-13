@@ -1,6 +1,7 @@
 import tensorflow as tf    
 import pandas as pd                 
-import numpy as np                                       
+import numpy as np   
+import scipy.ndimage as ndi
 import sklearn.model_selection     # For using KFold
 import keras.preprocessing.image   # For using image generation
 import datetime                    # To measure running time 
@@ -13,6 +14,7 @@ import tqdm                        # Use smart progress meter
 import seaborn as sns              # For pairplots
 import matplotlib.pyplot as plt    # Python 2D plotting library
 import matplotlib.cm as cm         # Color map
+import warnings
 
 IMG_WIDTH = 256
 IMG_HEIGHT = 256
@@ -20,6 +22,9 @@ IMG_CHANNELS = 3
 
 LOGS_DIR_NAME = 'logs' 
 SAVES_DIR_NAME = 'saves'
+min_object_size = 1 
+CW_DIR = os.getcwd()
+
 
 class NeuralNetwork():
     """ Implements a neural network.
@@ -641,3 +646,167 @@ class NeuralNetwork():
         return sess.run(self.loss_tf, feed_dict={self.x_data_tf: x_data, 
                                                  self.y_data_tf: y_data,
                                                  self.keep_prob_tf: keep_prob})
+    
+    
+    
+def trsf_proba_to_binary(y_data, iter= 5):
+    """Transform propabilities into binary values 0 or 1.""" 
+    y = np.greater(y_data,.5).astype(np.uint8)
+    y_result = []
+    
+    for m in y:
+        y_result.append(ndi.binary_dilation(m, iterations=iter).astype(np.uint8))
+    return y_result
+
+def get_labeled_mask(mask, cutoff=.5):
+    """Object segmentation by labeling the mask."""
+    mask = mask.reshape(mask.shape[0], mask.shape[1])
+    lab_mask = skimage.morphology.label(mask > cutoff) 
+    
+    # Keep only objects that are large enough.
+    (mask_labels, mask_sizes) = np.unique(lab_mask, return_counts=True)
+    if (mask_sizes < min_object_size).any():
+        mask_labels = mask_labels[mask_sizes < min_object_size]
+        for n in mask_labels:
+            lab_mask[lab_mask == n] = 0
+        lab_mask = skimage.morphology.label(lab_mask > cutoff) 
+    
+    return lab_mask  
+
+
+def get_iou(y_true_labeled, y_pred_labeled):
+    """Compute non-zero intersections over unions."""
+    # Array of different objects and occupied area.
+    (true_labels, true_areas) = np.unique(y_true_labeled, return_counts=True)
+    (pred_labels, pred_areas) = np.unique(y_pred_labeled, return_counts=True)
+
+    # Number of different labels.
+    n_true_labels = len(true_labels)
+    n_pred_labels = len(pred_labels)
+
+    # Each mask has at least one identified object.
+    if (n_true_labels > 1) and (n_pred_labels > 1):
+        
+        # Compute all intersections between the objects.
+        all_intersections = np.zeros((n_true_labels, n_pred_labels))
+        for i in range(y_true_labeled.shape[0]):
+            for j in range(y_true_labeled.shape[1]):
+                m = y_true_labeled[i,j]
+                n = y_pred_labeled[i,j]
+                all_intersections[m,n] += 1 
+
+        # Assign predicted to true background.
+        assigned = [[0,0]]
+        tmp = all_intersections.copy()
+        tmp[0,:] = -1
+        tmp[:,0] = -1
+
+        # Assign predicted to true objects if they have any overlap.
+        for i in range(1, np.min([n_true_labels, n_pred_labels])):
+            mn = list(np.unravel_index(np.argmax(tmp), (n_true_labels, n_pred_labels)))
+            if all_intersections[mn[0], mn[1]] > 0:
+                assigned.append(mn)
+            tmp[mn[0],:] = -1
+            tmp[:,mn[1]] = -1
+        assigned = np.array(assigned)
+
+        # Intersections over unions.
+        intersection = np.array([all_intersections[m,n] for m,n in assigned])
+        union = np.array([(true_areas[m] + pred_areas[n] - all_intersections[m,n]) 
+                           for m,n in assigned])
+        iou = intersection / union
+
+        # Remove background.
+        iou = iou[1:]
+        assigned = assigned[1:]
+        true_labels = true_labels[1:]
+        pred_labels = pred_labels[1:]
+
+        # Labels that are not assigned.
+        true_not_assigned = np.setdiff1d(true_labels, assigned[:,0])
+        pred_not_assigned = np.setdiff1d(pred_labels, assigned[:,1])
+        
+    else:
+        # in case that no object is identified in one of the masks
+        iou = np.array([])
+        assigned = np.array([])
+        true_labels = true_labels[1:]
+        pred_labels = pred_labels[1:]
+        true_not_assigned = true_labels
+        pred_not_assigned = pred_labels
+        
+    # Returning parameters.
+    params = {'iou': iou, 'assigned': assigned, 'true_not_assigned': true_not_assigned,
+             'pred_not_assigned': pred_not_assigned, 'true_labels': true_labels,
+             'pred_labels': pred_labels}
+    return params
+
+def get_score_summary(y_true, y_pred):
+    """Compute the score for a single sample including a detailed summary."""
+    
+    y_true_labeled = get_labeled_mask(y_true)  
+    y_pred_labeled = get_labeled_mask(y_pred) 
+    
+    params = get_iou(y_true_labeled, y_pred_labeled)
+    iou = params['iou']
+    assigned = params['assigned']
+    true_not_assigned = params['true_not_assigned']
+    pred_not_assigned = params['pred_not_assigned']
+    true_labels = params['true_labels']
+    pred_labels = params['pred_labels']
+    n_true_labels = len(true_labels)
+    n_pred_labels = len(pred_labels)
+
+    summary = []
+    summary_metrics = []
+    min_tp = 0
+    min_fn = 0
+    min_fp = 0
+    for i,threshold in enumerate(np.arange(0.5, 0.8, 0.05)):
+        tp = np.sum(iou > threshold)
+        fn = n_true_labels - tp
+        fp = n_pred_labels - tp
+        if (tp+fp+fn)>0: 
+            #prec = tp/(tp+fp+fn)
+            prec = tp/(tp+fp)
+        else: 
+            prec = 0
+            
+        if (tp+fn) > 0:
+            rec = tp/(tp+fn)
+        else:
+            rec = 0
+        
+        if (threshold == 0.5):
+                min_tp = tp
+                min_fn = fn
+                min_fp = fp
+            
+             
+        summary.append([threshold, prec, tp, fp, fn])
+        summary_metrics.append([np.mean(iou), prec,rec, n_true_labels, n_pred_labels, min_tp, min_fn, min_fp])
+
+    summary = np.array(summary)
+    summary_metrics = np.array(summary_metrics)
+    
+
+    score = np.nanmean(summary[:,1]) # Final score.
+    metrics = summary_metrics.mean(0)
+    
+    params_dict = {'summary': summary, 'iou': iou, 'assigned': assigned, 
+                   'true_not_assigned': true_not_assigned, 
+                   'pred_not_assigned': pred_not_assigned, 'true_labels': true_labels,
+                   'pred_labels': pred_labels, 'y_true_labeled': y_true_labeled,
+                   'y_pred_labeled': y_pred_labeled}
+    
+    return score, params_dict, metrics
+
+def get_score(y_true, y_pred):
+    """Compute the score for a batch of samples."""
+    scores = []
+    metrics = []
+    for i in range(len(y_true)):
+        score, _, m = get_score_summary(y_true[i], y_pred[i])
+        scores.append(score)
+        metrics.append(m)
+    return np.array(scores), np.array(metrics)
